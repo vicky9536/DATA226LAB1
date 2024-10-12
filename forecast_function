@@ -1,51 +1,36 @@
-CREATE OR REPLACE FUNCTION DEV.ANALYTICS.PREDICT_PRICE(FORECAST_DURATION INT, STOCK_DATA ARRAY)
-RETURNS TABLE(SYMBOL STRING, DATE TIMESTAMP_NTZ, FORECAST FLOAT, LOWER_BOUND FLOAT, UPPER_BOUND FLOAT)
+CREATE OR REPLACE FUNCTION STOCK_PRICE_PREDICTION(symbol VARCHAR, historical_data ARRAY, forecast_periods INT, confidence_interval FLOAT)
+RETURNS TABLE (symbol VARCHAR, forecast_date DATE, forecast FLOAT, lower_bound FLOAT, upper_bound FLOAT)
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.8'
-PACKAGES = ('numpy', 'pandas', 'statsmodels')
-HANDLER = 'price_forecast'
+PACKAGES = ('pandas', 'statsmodels')
+HANDLER = 'StockPriceForecast'
 AS
 $$
 import pandas as pd
-import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
-from datetime import timedelta
 
-def price_forecast(forecast_duration: int, stock_data: list) -> pd.DataFrame:
-    stock_df = pd.DataFrame(stock_data, columns=["SYMBOL", "DATE", "CLOSE"])
-    stock_df.columns = ["SYMBOL", "DATE", "CLOSE"]
+class StockPriceForecast:
+    def __init__(self):
+        self._symbol = ""
+        self._forecast_results = []
 
-    stock_df = stock_df.sort_values(by='DATE')
+    def process(self, symbol, historical_data, forecast_periods, confidence_interval):
+        self._symbol = symbol
+        
+        # Convert historical data to a Pandas DataFrame
+        df = pd.DataFrame(historical_data, columns=["date", "price"])
 
-    model = ARIMA(stock_df['CLOSE'], order=(5, 1, 0))
-    arima_result = model.fit()
+        # Fit ARIMA model
+        model = ARIMA(df['price'], order=(5, 1, 0))
+        model_fit = model.fit()
 
-    forecast_result = arima_result.get_forecast(steps=forecast_duration)
-    forecasted_values = forecast_result.predicted_mean
-    confidence_intervals = forecast_result.conf_int()
-    lower_bounds = confidence_intervals[:, 0]
-    upper_bounds = confidence_intervals[:, 1]
+        # Generate forecasts
+        forecast, stderr, conf_int = model_fit.forecast(steps=forecast_periods, alpha=1-confidence_interval)
 
-    last_date = stock_df['DATE'].max()
-    forecast_dates = [last_date + timedelta(days=i) for i in range(1,     
-                      forecast_duration + 1)]
+        # Generate future dates for the forecast
+        forecast_dates = pd.date_range(start=df["date"].iloc[-1], periods=forecast_periods+1, freq="D")[1:]
 
-    forecast_df = pd.DataFrame({
-        'SYMBOL': stock_df['SYMBOL'].iloc[0],
-        'DATE': forecast_dates,
-        'FORECAST': forecasted_values,
-        'LOWER_BOUND': lower_bounds,
-        'UPPER_BOUND': upper_bounds
-    })
-
-    return forecast_df
-
+        # Yield the forecast results, lower and upper bounds
+        for i in range(forecast_periods):
+            yield (symbol, forecast_dates[i], forecast[i], conf_int[i][0], conf_int[i][1])
 $$;
-WITH stock_data AS (
-    -- Step 1: Aggregate SYMBOL, DATE, and CLOSE into an array
-    SELECT ARRAY_AGG(OBJECT_CONSTRUCT('SYMBOL', SYMBOL, 'DATE', DATE, 'CLOSE', CLOSE)) AS stock_data
-    FROM dev.raw_data.time_series_daily
-)
--- Step 2: Pass the array to the UDF
-SELECT * 
-FROM TABLE(DEV.ANALYTICS.PREDICT_PRICE(7, (SELECT stock_data FROM stock_data)));

@@ -46,7 +46,8 @@ def return_last_90day_price(symbol):
 @task
 def combine_data(*args):
     combined_results = []
-
+    
+    # Combine the returned 90day price for each symbol
     for data in args:
         combined_results.extend(data)
 
@@ -108,12 +109,14 @@ with DAG(
     symbols = ["IBM", "AAPL", "NVDA"]
     cur = return_snowflake_conn()
 
-    #days_records = return_last_90day_price(symbol)
     fetch_tasks = []
+
+    # First, fetch the price data for each symbol
     for symbol in symbols:
         task = return_last_90day_price(symbol)
         fetch_tasks.append(task.output)
 
+    # Then, combine the returned 90day price data for each symbol to transform and load
     days_records = combine_data(*fetch_tasks)
     lines = transform(days_records)
     load(cur, lines)

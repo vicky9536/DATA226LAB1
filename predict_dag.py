@@ -7,7 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1KdMEdZEmLpKtvU9cCpxX5GGIGn__Z_BK
 """
 
-# In Cloud Composer, add snowflake-connector-python to PYPI Packages
 from airflow import DAG
 from airflow.models import Variable
 from airflow.decorators import task
@@ -24,24 +23,21 @@ def return_snowflake_conn():
     password = Variable.get('snowflake_password')
     account = Variable.get('snowflake_account')
 
-    # Establish a connection to Snowflake
     conn = snowflake.connector.connect(
         user=user_id,
         password=password,
-        account=account,  # Example: 'xyz12345.us-east-1'
+        account=account, 
         warehouse='compute_wh',
         database='dev'
     )
-    # Create a cursor object
+
     return conn.cursor()
 
 
 @task
 def train(cur, symbol, train_input_table, forecast_function_name_prefix):
-    """
-     - Create a view with training related columns
-     - Create a model with the view above
-    """
+    
+    # Create train_view, customized forecast_function and model for each symbol 
     train_view = f"dev.adhoc.train_stock_view_{symbol}"
     forecast_function_name = f"{forecast_function_name_prefix}_{symbol}"
 
@@ -61,7 +57,6 @@ def train(cur, symbol, train_input_table, forecast_function_name_prefix):
     try:
         cur.execute(create_view_sql)
         cur.execute(create_model_sql)
-        # Inspect the accuracy metrics of your model.
         cur.execute(f"CALL {forecast_function_name}!SHOW_EVALUATION_METRICS();")
     except Exception as e:
         print(e)
